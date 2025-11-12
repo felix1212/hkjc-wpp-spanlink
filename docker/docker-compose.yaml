@@ -1,0 +1,77 @@
+name: hkjc-wpp
+
+services:
+  hkjc-wpp-spanlink:
+    image: hkjc-wpp-spanlink:0.0.1
+    container_name: hkjc-wpp-spanlink
+    environment:
+      #### Environment Variables for DD Tracer ####
+      - DD_AGENT_HOST=dd-agent
+      - DD_TRACE_DEBUG=false
+      - DD_DYNAMIC_INSTRUMENTATION_ENABLED=TRUE
+      - DD_TRACE_REMOVE_INTEGRATION_SERVICE_NAMES_ENABLED=true
+    ports:
+      - "8080:8080"
+    networks:
+      - hkjc-wpp
+    #### Java options for DD tracer ####       
+    command: >
+      java -javaagent:/app/dd-java-agent.jar
+      -Ddd.profiling.enabled=true
+      -XX:FlightRecorderOptions=stackdepth=256
+      -Ddd.service=Testapp-hkjc-wpp-spanlink
+      -Ddd.env=DEV
+      -Ddd.version=0.0.1
+      -Ddd.trace.propagation.style=tracecontext
+      -Ddd.trace.otel.enabled=true
+      -Ddd.tags=HKJC_Tier:Testapp-hkjc-wpp-spanlink
+      -jar /app/hkjc-wpp-spanlink.war --aggregation.trigger.count=3
+      --aggregation.trigger.interval.seconds=10
+    depends_on:
+      - dd-agent
+
+  dd-agent:
+    cgroup: host
+    pid: host
+    container_name: dd-agent
+    environment:
+      - DD_API_KEY=${DD_API_KEY} 
+      - DD_SITE=datadoghq.com
+      # - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT=0.0.0.0:4317
+      # - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT=0.0.0.0:4318
+      - DD_LOGS_INJECTION=true
+      - DD_LOGS_ENABLED=true
+      - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
+      # - DD_OTLP_CONFIG_LOGS_ENABLED=true
+      - DD_APM_ENABLED=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true # Receive APM data from other containers
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true # Receive metrics from other containers
+      - DD_APM_RECEIVER_SOCKET=/opt/datadog/apm/inject/run/apm.socket
+      - DD_PROCESS_AGENT_ENABLED=true
+      #- DD_SYSTEM_PROBE_NETWORK_ENABLED=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    # ports:
+    #   - 4317:4317
+    #   - 8126:8126/tcp
+    #   - 4318:4318
+    image: gcr.io/datadoghq/agent:latest
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - SYS_PTRACE
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+      - IPC_LOCK
+      - CHOWN
+    security_opt:
+      - apparmor:unconfined
+    networks:
+      - hkjc-wpp
+
+networks:
+  hkjc-wpp:
