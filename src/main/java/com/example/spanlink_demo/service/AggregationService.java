@@ -35,10 +35,17 @@ public class AggregationService {
     private final AtomicInteger requestCount = new AtomicInteger(0);
     private final ReentrantLock lock = new ReentrantLock();
     private final List<SpanContext> pendingSpanContexts = new ArrayList<>();
+
+    /**
+     * Rolling buffer of the x-request-id values associated with the pending requests.
+     * At most 3 items are kept.
+     */
+    private final List<String> pendingRequestIds = new ArrayList<>();
+
     private volatile Long lastResetTime = null; // null means no timer started yet
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
-    private Tracer tracer;
+    private final Tracer tracer;
 
     @Autowired
     public AggregationService(Tracer tracer) {
@@ -60,23 +67,47 @@ public class AggregationService {
         }
     }
 
-    public void recordIncomingRequest(SpanContext spanContext) {
+    /**
+     * Called by the controller once per incoming request.
+     *
+     * @param spanContext span context of the incoming request span
+     * @param requestId   x-request-id header value (already validated in controller)
+     */
+    public void recordIncomingRequest(SpanContext spanContext, String requestId) {
         lock.lock();
         try {
             int count = requestCount.incrementAndGet();
             pendingSpanContexts.add(spanContext);
-            
+
+            if (requestId != null && !requestId.isBlank()) {
+                pendingRequestIds.add(requestId);
+                // Keep only the last 3 request IDs
+                if (pendingRequestIds.size() > 3) {
+                    pendingRequestIds.remove(0);
+                }
+            }
+
             // Start the timer on the first request
             if (lastResetTime == null) {
                 lastResetTime = System.currentTimeMillis();
             }
-            
-            String traceId = spanContext.getTraceId();
-            logger.info("Incoming request recorded. Trace ID: {}, Total count: {}, Timestamp: {}", 
-                    traceId, count, Instant.now());
 
+            String traceId = spanContext.getTraceId();
+            logger.info(
+                    "Incoming request recorded. Trace ID: {}, x-request-id(s): {}, Total count: {}, Timestamp: {}",
+                    traceId,
+                    String.join(", ", pendingRequestIds),
+                    count,
+                    Instant.now()
+            );
+
+            // Count-based trigger
             if (count >= triggerCount) {
-                triggerAction("count_threshold", pendingSpanContexts);
+                triggerAction(
+                        "count_threshold",
+                        new ArrayList<>(pendingSpanContexts),
+                        new ArrayList<>(pendingRequestIds)
+                );
                 reset();
             }
         } finally {
@@ -91,9 +122,13 @@ public class AggregationService {
             if (lastResetTime != null && !pendingSpanContexts.isEmpty()) {
                 long currentTime = System.currentTimeMillis();
                 long elapsed = currentTime - lastResetTime;
-                
+
                 if (elapsed >= triggerIntervalSeconds * 1000) {
-                    triggerAction("time_interval", new ArrayList<>(pendingSpanContexts));
+                    triggerAction(
+                            "time_interval",
+                            new ArrayList<>(pendingSpanContexts),
+                            new ArrayList<>(pendingRequestIds)
+                    );
                     reset();
                 }
             }
@@ -102,14 +137,16 @@ public class AggregationService {
         }
     }
 
-    private void triggerAction(String reason, List<SpanContext> spanContexts) {
+    private void triggerAction(String reason,
+                               List<SpanContext> spanContexts,
+                               List<String> requestIds) {
+
         // Create a span builder and add links for all pending spans
         var spanBuilder = tracer.spanBuilder("aggregated-action")
                 .setSpanKind(SpanKind.INTERNAL);
-        
-        // Add links to all incoming request spans
-        for (SpanContext spanContext : spanContexts) {
-            spanBuilder.addLink(spanContext);
+
+        for (SpanContext ctx : spanContexts) {
+            spanBuilder.addLink(ctx);
         }
 
         // Create a new span that links to all incoming request spans
@@ -120,17 +157,31 @@ public class AggregationService {
             aggregatedSpan.setAttribute("trigger.count", spanContexts.size());
             aggregatedSpan.setAttribute("trigger.timestamp", Instant.now().toString());
 
+            // ----- x-request-id attributes (1..3 & combined) -----
+            aggregatedSpan.setAttribute("x-request-id.count", requestIds.size());
+            for (int i = 0; i < requestIds.size(); i++) {
+                aggregatedSpan.setAttribute("x-request-id-" + (i + 1), requestIds.get(i));
+            }
+            aggregatedSpan.setAttribute("x-request-id.all", String.join(",", requestIds));
+
             // Get master trace ID (from the aggregated span)
             String masterTraceId = aggregatedSpan.getSpanContext().getTraceId();
-            
+
             // Collect trace IDs from all linked spans
             List<String> linkedTraceIds = new ArrayList<>();
-            for (SpanContext spanContext : spanContexts) {
-                linkedTraceIds.add(spanContext.getTraceId());
+            for (SpanContext ctx : spanContexts) {
+                linkedTraceIds.add(ctx.getTraceId());
             }
 
-            logger.info("Action triggered. Master Trace ID: {}, Linked Trace IDs: {}, Reason: {}, Linked spans count: {}, Timestamp: {}", 
-                    masterTraceId, linkedTraceIds, reason, spanContexts.size(), Instant.now());
+            logger.info(
+                    "Action triggered. Master Trace ID: {}, Linked Trace IDs: {}, x-request-id(s): {}, Reason: {}, Linked spans count: {}, Timestamp: {}",
+                    masterTraceId,
+                    linkedTraceIds,
+                    requestIds,
+                    reason,
+                    spanContexts.size(),
+                    Instant.now()
+            );
         } finally {
             aggregatedSpan.end();
         }
@@ -139,7 +190,7 @@ public class AggregationService {
     private void reset() {
         requestCount.set(0);
         pendingSpanContexts.clear();
+        pendingRequestIds.clear();
         lastResetTime = null; // Reset timer - will start again on next request
     }
 }
-

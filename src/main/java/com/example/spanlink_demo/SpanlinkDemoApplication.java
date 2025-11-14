@@ -1,5 +1,7 @@
 /*
  * v0.0.1 - Initial working version
+ * v0.0.2 - Added x-request-id validation
+ * v0.0.4 - Added x-request-id to span attributes
  * 
  */
 

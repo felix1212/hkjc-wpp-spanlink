@@ -2,7 +2,7 @@ name: hkjc-wpp
 
 services:
   hkjc-wpp-spanlink:
-    image: hkjc-wpp-spanlink:0.0.1
+    image: felix1212/hkjc-wpp-spanlink:0.0.4
     container_name: hkjc-wpp-spanlink
     environment:
       #### Environment Variables for DD Tracer ####
@@ -21,7 +21,7 @@ services:
       -XX:FlightRecorderOptions=stackdepth=256
       -Ddd.service=Testapp-hkjc-wpp-spanlink
       -Ddd.env=DEV
-      -Ddd.version=0.0.1
+      -Ddd.version=0.0.4
       -Ddd.trace.propagation.style=tracecontext
       -Ddd.trace.otel.enabled=true
       -Ddd.tags=HKJC_Tier:Testapp-hkjc-wpp-spanlink
