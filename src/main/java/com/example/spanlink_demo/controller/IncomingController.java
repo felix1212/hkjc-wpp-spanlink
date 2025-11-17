@@ -23,6 +23,10 @@ public class IncomingController {
     private final Tracer tracer;
     private final AggregationService aggregationService;
 
+    /*
+     *  -- NOTE --
+     *  Inject tracer dependency
+     */
     public IncomingController(Tracer tracer, AggregationService aggregationService) {
         this.tracer = tracer;
         this.aggregationService = aggregationService;
@@ -41,8 +45,13 @@ public class IncomingController {
             ));
         }
 
+        /*
+        *  -- NOTE --
+        *  Start span when requests go to /incoming
+        *  Add span tags
+        */
         // 2) Create a SERVER span for this endpoint
-        Span span = tracer.spanBuilder("POST /incoming")
+        Span span = tracer.spanBuilder("handleIncomingMethod")
                 .setSpanKind(SpanKind.SERVER)
                 .startSpan();
 
@@ -53,6 +62,12 @@ public class IncomingController {
             span.setAttribute("http.method", "POST");
             span.setAttribute("http.route", "/incoming");
             span.setAttribute("request.timestamp", Instant.now().toString());
+
+            /*
+            *  -- NOTE --
+            *  log request IDs and trace IDs
+            *  Send context and request IDs to recordIncomingRequest once every incoming request
+            */
 
             // 4) Log requestId together with traceId
             SpanContext ctx = span.getSpanContext();

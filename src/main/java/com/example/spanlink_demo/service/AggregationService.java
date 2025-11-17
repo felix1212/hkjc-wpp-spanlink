@@ -76,13 +76,18 @@ public class AggregationService {
     public void recordIncomingRequest(SpanContext spanContext, String requestId) {
         lock.lock();
         try {
+            /*
+            *  -- NOTE --
+            *  create pendingSpanContexts list object to store trace context for every request, and pendingRequestIds list object
+            *  write log for every request
+            */
             int count = requestCount.incrementAndGet();
             pendingSpanContexts.add(spanContext);
 
             if (requestId != null && !requestId.isBlank()) {
                 pendingRequestIds.add(requestId);
-                // Keep only the last 3 request IDs
-                if (pendingRequestIds.size() > 3) {
+                // Keep all request IDs
+                if (pendingRequestIds.size() > triggerCount) {
                     pendingRequestIds.remove(0);
                 }
             }
@@ -103,6 +108,11 @@ public class AggregationService {
 
             // Count-based trigger
             if (count >= triggerCount) {
+                /*
+                *  -- NOTE --
+                *  call triggerAction when criteria fulfilled
+                *  Send context arraylist and request ID arraylist
+                */
                 triggerAction(
                         "count_threshold",
                         new ArrayList<>(pendingSpanContexts),
@@ -142,9 +152,17 @@ public class AggregationService {
                                List<String> requestIds) {
 
         // Create a span builder and add links for all pending spans
+        /*
+        *  -- NOTE --
+        *  Start span for outgoing action. In real case this will be writing trace context (as trace parent) to document and calling MongoDB.
+        */
         var spanBuilder = tracer.spanBuilder("aggregated-action")
                 .setSpanKind(SpanKind.INTERNAL);
-
+        /*
+        *  -- NOTE --
+        *  IMPORTANT!
+        *  Call addLink and input trace context as parameter, and start as usual
+        */
         for (SpanContext ctx : spanContexts) {
             spanBuilder.addLink(ctx);
         }
@@ -182,6 +200,54 @@ public class AggregationService {
                     spanContexts.size(),
                     Instant.now()
             );
+
+            /*
+             *  Sample Code of trace context injection
+             * 
+                import io.opentelemetry.api.GlobalOpenTelemetry;
+                import io.opentelemetry.context.Context;
+                import io.opentelemetry.context.propagation.TextMapSetter;
+
+                TextMapSetter<Map<String, String>> mapSetter = Map::put;
+
+                Map<String, String> carrier = new HashMap<>();
+                GlobalOpenTelemetry.getPropagators()
+                        .getTextMapPropagator()
+                        .inject(Context.current(), carrier, mapSetter);
+
+                String traceparent = carrier.get("traceparent");
+
+                Document doc = new Document("data", "something")
+                        .append("traceparent", traceparent);
+                
+
+                Sample Code of trace context extraction
+
+                TextMapGetter<Document> traceparentGetter = new TextMapGetter<>() {
+                    @Override
+                    public Iterable<String> keys(Document carrier) {
+                        return Collections.singleton("traceparent");
+                    }
+
+                    @Override
+                    public String get(Document carrier, String key) {
+                        if (carrier == null) return null;
+                        if (!carrier.containsKey(key)) return null;
+                        Object v = carrier.get(key);
+                        return v != null ? v.toString() : null;
+                    }
+                };
+
+                Context parentCtx = GlobalOpenTelemetry.getPropagators()
+                    .getTextMapPropagator()
+                    .extract(Context.current(), fullDoc, traceparentGetter);
+
+                Span span = tracer.spanBuilder("process-mongo-change")
+                        .setSpanKind(SpanKind.CONSUMER)
+                        .setParent(parentCtx)
+                        .startSpan();
+             *
+             */
         } finally {
             aggregatedSpan.end();
         }
