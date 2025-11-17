@@ -73,22 +73,5 @@ services:
     networks:
       - hkjc-wpp
 
-  mongo1:
-    image: mongo:latest   # or use a version you prefer
-    container_name: mongo1
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo1_data:/data/db
-    # environment:
-    #   MONGO_INITDB_ROOT_USERNAME: root
-    #   MONGO_INITDB_ROOT_PASSWORD: P@ss1234
-    networks:
-      - hkjc-wpp
-
-volumes:
-  mongo1_data:
-
 networks:
   hkjc-wpp:
