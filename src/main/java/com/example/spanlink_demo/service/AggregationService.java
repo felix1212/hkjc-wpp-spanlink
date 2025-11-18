@@ -46,10 +46,12 @@ public class AggregationService {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     private final Tracer tracer;
+    private final MongoContextService mongoContextService;
 
     @Autowired
-    public AggregationService(Tracer tracer) {
+    public AggregationService(Tracer tracer, MongoContextService mongoContextService) {
         this.tracer = tracer;
+        this.mongoContextService = mongoContextService;
         // Schedule periodic check every second
         scheduler.scheduleAtFixedRate(this::checkTimeTrigger, 1, 1, TimeUnit.SECONDS);
     }
@@ -78,7 +80,7 @@ public class AggregationService {
         try {
             /*
             *  -- NOTE --
-            *  create pendingSpanContexts list object to store trace context for every request, and pendingRequestIds list object
+            *  create pendingSpanContexts list object to store span context for every request, and pendingRequestIds list object
             *  write log for every request
             */
             int count = requestCount.incrementAndGet();
@@ -162,6 +164,7 @@ public class AggregationService {
         *  -- NOTE --
         *  IMPORTANT!
         *  Call addLink and input trace context as parameter, and start as usual
+        *  Perform .addLink() before .startSpan()
         */
         for (SpanContext ctx : spanContexts) {
             spanBuilder.addLink(ctx);
@@ -202,52 +205,23 @@ public class AggregationService {
             );
 
             /*
-             *  Sample Code of trace context injection
-             * 
-                import io.opentelemetry.api.GlobalOpenTelemetry;
-                import io.opentelemetry.context.Context;
-                import io.opentelemetry.context.propagation.TextMapSetter;
-
-                TextMapSetter<Map<String, String>> mapSetter = Map::put;
-
-                Map<String, String> carrier = new HashMap<>();
-                GlobalOpenTelemetry.getPropagators()
-                        .getTextMapPropagator()
-                        .inject(Context.current(), carrier, mapSetter);
-
-                String traceparent = carrier.get("traceparent");
-
-                Document doc = new Document("data", "something")
-                        .append("traceparent", traceparent);
-                
-
-                Sample Code of trace context extraction
-
-                TextMapGetter<Document> traceparentGetter = new TextMapGetter<>() {
-                    @Override
-                    public Iterable<String> keys(Document carrier) {
-                        return Collections.singleton("traceparent");
-                    }
-
-                    @Override
-                    public String get(Document carrier, String key) {
-                        if (carrier == null) return null;
-                        if (!carrier.containsKey(key)) return null;
-                        Object v = carrier.get(key);
-                        return v != null ? v.toString() : null;
-                    }
-                };
-
-                Context parentCtx = GlobalOpenTelemetry.getPropagators()
-                    .getTextMapPropagator()
-                    .extract(Context.current(), fullDoc, traceparentGetter);
-
-                Span span = tracer.spanBuilder("process-mongo-change")
-                        .setSpanKind(SpanKind.CONSUMER)
-                        .setParent(parentCtx)
-                        .startSpan();
-             *
+             *  -- NOTE --
+             *  Write pendingRequestIds and pendingSpanContexts to MongoDB for downstream context propagation
              */
+            try {
+                mongoContextService.saveAggregatedContext(
+                        reason,
+                        spanContexts,
+                        requestIds,
+                        masterTraceId
+                );
+                aggregatedSpan.setAttribute("mongo.write.success", true);
+                logger.info("Successfully wrote aggregated context to MongoDB for downstream processing");
+            } catch (Exception e) {
+                aggregatedSpan.setAttribute("mongo.write.success", false);
+                aggregatedSpan.setAttribute("mongo.write.error", e.getMessage());
+                logger.error("Failed to write aggregated context to MongoDB", e);
+            }
         } finally {
             aggregatedSpan.end();
         }

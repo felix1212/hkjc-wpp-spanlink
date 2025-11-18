@@ -5,7 +5,7 @@ FROM eclipse-temurin:23-jdk
 WORKDIR /app
 
 # Copy the WAR file into the container at /app/application.war
-COPY hkjc-wpp-spanlink-0.0.4.war /app/hkjc-wpp-spanlink.war
+COPY hkjc-wpp-spanlink-0.1.0.war /app/hkjc-wpp-spanlink.war
 
 # Expose the port that the application will run on
 EXPOSE 8080

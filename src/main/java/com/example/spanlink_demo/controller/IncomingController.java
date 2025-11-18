@@ -50,14 +50,14 @@ public class IncomingController {
         *  Start span when requests go to /incoming
         *  Add span tags
         */
-        // 2) Create a SERVER span for this endpoint
+        // Create a SERVER span for this endpoint
         Span span = tracer.spanBuilder("handleIncomingMethod")
                 .setSpanKind(SpanKind.SERVER)
                 .startSpan();
 
         // Put span in scope for this method
         try (Scope scope = span.makeCurrent()) {
-            // 3) Tag the span with x-request-id
+            // Tag the span with x-request-id
             span.setAttribute("x-request-id", requestId);
             span.setAttribute("http.method", "POST");
             span.setAttribute("http.route", "/incoming");
@@ -69,12 +69,12 @@ public class IncomingController {
             *  Send context and request IDs to recordIncomingRequest once every incoming request
             */
 
-            // 4) Log requestId together with traceId
+            // Log requestId together with traceId
             SpanContext ctx = span.getSpanContext();
             String traceId = ctx.getTraceId();
             log.info("Received HTTP POST request at /incoming endpoint. x-request-id={} traceId={}", requestId, traceId);
 
-            // Your existing aggregation logic (kept as-is)
+            // Process required logic for every incoming request
             aggregationService.recordIncomingRequest(ctx, requestId);
 
             return ResponseEntity.ok(Map.of(

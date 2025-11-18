@@ -2,7 +2,7 @@ name: hkjc-wpp
 
 services:
   hkjc-wpp-spanlink:
-    image: felix1212/hkjc-wpp-spanlink:0.0.4
+    image: felix1212/hkjc-wpp-spanlink:0.1.0
     container_name: hkjc-wpp-spanlink
     environment:
       #### Environment Variables for DD Tracer ####
@@ -10,6 +10,10 @@ services:
       - DD_TRACE_DEBUG=false
       - DD_DYNAMIC_INSTRUMENTATION_ENABLED=TRUE
       - DD_TRACE_REMOVE_INTEGRATION_SERVICE_NAMES_ENABLED=true
+      # - DD_APM_FILTER_TAGS_REJECT="db.operation:getMore"
+      # - DD_APM_IGNORE_RESOURCES="^\{"getMore":.*\$db":"spanlink-demo".*\}"
+      #### MongoDB Configuration (override for Docker) ####
+      # - SPRING_DATA_MONGODB_URI=mongodb://mongo1:27017/spanlink-demo
     ports:
       - "8080:8080"
     networks:
@@ -21,14 +25,52 @@ services:
       -XX:FlightRecorderOptions=stackdepth=256
       -Ddd.service=Testapp-hkjc-wpp-spanlink
       -Ddd.env=DEV
-      -Ddd.version=0.0.4
+      -Ddd.version=0.1.0
       -Ddd.trace.propagation.style=tracecontext
       -Ddd.trace.otel.enabled=true
       -Ddd.tags=HKJC_Tier:Testapp-hkjc-wpp-spanlink
       -jar /app/hkjc-wpp-spanlink.war --aggregation.trigger.count=3
       --aggregation.trigger.interval.seconds=10
+      --spring.data.mongodb.uri=mongodb://mongo1:27017/spanlink-demo
+      --spring.data.mongodb.database=spanlink-demo
     depends_on:
       - dd-agent
+      - mongo1
+
+  hkjc-wpp-spanlink-subscriber:
+    image: felix1212/hkjc-wpp-spanlink-subscriber:0.0.2
+    container_name: hkjc-wpp-spanlink-subscriber
+    environment:
+      #### Environment Variables for DD Tracer ####
+      - DD_AGENT_HOST=dd-agent
+      - DD_TRACE_DEBUG=false
+      - DD_DYNAMIC_INSTRUMENTATION_ENABLED=TRUE
+      - DD_TRACE_REMOVE_INTEGRATION_SERVICE_NAMES_ENABLED=true
+      # - DD_APM_FILTER_TAGS_REJECT="db.operation:getMore"
+      # - DD_APM_IGNORE_RESOURCES="^\{"getMore":.*\$db":"spanlink-demo".*\}"
+      #### MongoDB Configuration (override for Docker) ####
+      # - SPRING_DATA_MONGODB_URI=mongodb://mongo1:27017/spanlink-demo
+    ports:
+      - "8081:8081"
+    networks:
+      - hkjc-wpp
+    #### Java options for DD tracer ####       
+    command: >
+      java -javaagent:/app/dd-java-agent.jar
+      -Ddd.profiling.enabled=true
+      -XX:FlightRecorderOptions=stackdepth=256
+      -Ddd.service=Testapp-hkjc-wpp-spanlink-subscriber
+      -Ddd.env=DEV
+      -Ddd.version=0.0.2
+      -Ddd.trace.propagation.style=tracecontext
+      -Ddd.trace.otel.enabled=true
+      -Ddd.tags=HKJC_Tier:Testapp-hkjc-wpp-spanlink-subscriber
+      -jar /app/hkjc-wpp-spanlink-subscriber.war --mongodb.change-stream.collection=aggregated_contexts
+      --spring.data.mongodb.uri=mongodb://mongo1:27017/spanlink-demo
+      --spring.data.mongodb.database=spanlink-demo
+    depends_on:
+      - dd-agent
+      - mongo1
 
   dd-agent:
     cgroup: host
@@ -48,6 +90,8 @@ services:
       - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true # Receive metrics from other containers
       - DD_APM_RECEIVER_SOCKET=/opt/datadog/apm/inject/run/apm.socket
       - DD_PROCESS_AGENT_ENABLED=true
+      # - DD_APM_FILTER_TAGS_REJECT="db.operation:getMore"
+      - "DD_APM_IGNORE_RESOURCES=^\\{\"getMore\":\\s*\"[^\"]*\",\\s*\"collection\":\\s*\"[^\"]*\",\\s*\"\\$db\":\\s*\"spanlink-demo\".*\\}$"
       #- DD_SYSTEM_PROBE_NETWORK_ENABLED=true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -86,6 +130,32 @@ services:
     #   MONGO_INITDB_ROOT_PASSWORD: P@ss1234
     networks:
       - hkjc-wpp
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  mongo-init:
+    image: mongo:latest
+    container_name: mongo-init
+    depends_on:
+      mongo1:
+        condition: service_healthy
+    entrypoint: >
+      /bin/bash -c "
+      until mongosh --host mongo1:27017 --eval 'db.runCommand(\"ping\")' --quiet; do
+        echo 'Waiting for MongoDB to be ready...'
+        sleep 2
+      done
+      echo 'Initializing replica set...'
+      mongosh --host mongo1:27017 --eval 'try { rs.status() } catch (e) { rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongo1:27017\"}]}) }' --quiet
+      echo 'Replica set initialization complete'
+      "
+    networks:
+      - hkjc-wpp
+    restart: "no"
 
 volumes:
   mongo1_data:
