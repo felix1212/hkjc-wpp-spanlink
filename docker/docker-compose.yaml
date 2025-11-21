@@ -143,16 +143,25 @@ services:
     depends_on:
       mongo1:
         condition: service_healthy
-    entrypoint: >
-      /bin/bash -c "
-      until mongosh --host mongo1:27017 --eval 'db.runCommand(\"ping\")' --quiet; do
-        echo 'Waiting for MongoDB to be ready...'
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      until mongosh --host mongo1:27017 --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
         sleep 2
       done
-      echo 'Initializing replica set...'
-      mongosh --host mongo1:27017 --eval 'try { rs.status() } catch (e) { rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongo1:27017\"}]}) }' --quiet
-      echo 'Replica set initialization complete'
-      "
+
+      mongosh --host mongo1:27017 --eval '
+        try {
+          rs.status();
+          print("Replica set already initialized");
+        } catch (e) {
+          print("Initializing replica set...");
+          rs.initiate({
+            _id: "rs0",
+            members: [{ _id: 0, host: "mongo1:27017" }]
+          });
+        }
+      '
+
     networks:
       - hkjc-wpp
     restart: "no"
