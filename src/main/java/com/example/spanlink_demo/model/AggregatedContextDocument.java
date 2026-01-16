@@ -17,17 +17,20 @@ public class AggregatedContextDocument {
     private List<SpanContextData> pendingSpanContexts;
     private String masterTraceId;
     private Instant timestamp;
+    private Instant firstRequestTimestamp; // Timestamp of the first request in the batch
 
     public AggregatedContextDocument() {
     }
 
     public AggregatedContextDocument(String triggerReason, List<String> pendingRequestIds,
-                                     List<SpanContextData> pendingSpanContexts, String masterTraceId) {
+                                     List<SpanContextData> pendingSpanContexts, String masterTraceId,
+                                     Instant firstRequestTimestamp) {
         this.triggerReason = triggerReason;
         this.pendingRequestIds = pendingRequestIds;
         this.pendingSpanContexts = pendingSpanContexts;
         this.masterTraceId = masterTraceId;
         this.timestamp = Instant.now();
+        this.firstRequestTimestamp = firstRequestTimestamp;
     }
 
     // Getters and Setters
@@ -77,6 +80,14 @@ public class AggregatedContextDocument {
 
     public void setTimestamp(Instant timestamp) {
         this.timestamp = timestamp;
+    }
+
+    public Instant getFirstRequestTimestamp() {
+        return firstRequestTimestamp;
+    }
+
+    public void setFirstRequestTimestamp(Instant firstRequestTimestamp) {
+        this.firstRequestTimestamp = firstRequestTimestamp;
     }
 
     /**

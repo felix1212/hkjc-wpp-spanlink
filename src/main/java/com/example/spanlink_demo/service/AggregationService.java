@@ -43,6 +43,7 @@ public class AggregationService {
     private final List<String> pendingRequestIds = new ArrayList<>();
 
     private volatile Long lastResetTime = null; // null means no timer started yet
+    private volatile Instant firstRequestTimestamp = null; // Timestamp of the first request in the current batch
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     private final Tracer tracer;
@@ -97,6 +98,7 @@ public class AggregationService {
             // Start the timer on the first request
             if (lastResetTime == null) {
                 lastResetTime = System.currentTimeMillis();
+                firstRequestTimestamp = Instant.now(); // Capture timestamp of the first request
             }
 
             String traceId = spanContext.getTraceId();
@@ -118,7 +120,8 @@ public class AggregationService {
                 triggerAction(
                         "count_threshold",
                         new ArrayList<>(pendingSpanContexts),
-                        new ArrayList<>(pendingRequestIds)
+                        new ArrayList<>(pendingRequestIds),
+                        firstRequestTimestamp
                 );
                 reset();
             }
@@ -139,7 +142,8 @@ public class AggregationService {
                     triggerAction(
                             "time_interval",
                             new ArrayList<>(pendingSpanContexts),
-                            new ArrayList<>(pendingRequestIds)
+                            new ArrayList<>(pendingRequestIds),
+                            firstRequestTimestamp
                     );
                     reset();
                 }
@@ -151,7 +155,8 @@ public class AggregationService {
 
     private void triggerAction(String reason,
                                List<SpanContext> spanContexts,
-                               List<String> requestIds) {
+                               List<String> requestIds,
+                               Instant firstRequestTimestamp) {
 
         // Create a span builder and add links for all pending spans
         /*
@@ -177,6 +182,7 @@ public class AggregationService {
             aggregatedSpan.setAttribute("trigger.reason", reason);
             aggregatedSpan.setAttribute("trigger.count", spanContexts.size());
             aggregatedSpan.setAttribute("trigger.timestamp", Instant.now().toString());
+            aggregatedSpan.setAttribute("first.request.timestamp", firstRequestTimestamp != null ? firstRequestTimestamp.toString() : "unknown");
 
             // ----- x-request-id attributes (1..3 & combined) -----
             aggregatedSpan.setAttribute("x-request-id.count", requestIds.size());
@@ -213,7 +219,8 @@ public class AggregationService {
                         reason,
                         spanContexts,
                         requestIds,
-                        masterTraceId
+                        masterTraceId,
+                        firstRequestTimestamp
                 );
                 aggregatedSpan.setAttribute("mongo.write.success", true);
                 logger.info("Successfully wrote aggregated context to MongoDB for downstream processing");
@@ -232,5 +239,6 @@ public class AggregationService {
         pendingSpanContexts.clear();
         pendingRequestIds.clear();
         lastResetTime = null; // Reset timer - will start again on next request
+        firstRequestTimestamp = null; // Reset first request timestamp
     }
 }

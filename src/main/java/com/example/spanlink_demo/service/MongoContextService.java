@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,13 +36,15 @@ public class MongoContextService {
      * @param spanContexts         list of span contexts to be propagated
      * @param requestIds           list of request IDs
      * @param masterTraceId        the master trace ID from the aggregated span
+     * @param firstRequestTimestamp timestamp of the first request in the batch (for end-to-end time measurement)
      * @return the saved document
      */
     public AggregatedContextDocument saveAggregatedContext(
             String triggerReason,
             List<SpanContext> spanContexts,
             List<String> requestIds,
-            String masterTraceId) {
+            String masterTraceId,
+            Instant firstRequestTimestamp) {
         /*
         *  -- NOTE --
         *  IMPORTANT!
@@ -81,7 +84,8 @@ public class MongoContextService {
                 triggerReason,
                 new ArrayList<>(requestIds),
                 spanContextDataList,
-                masterTraceId
+                masterTraceId,
+                firstRequestTimestamp
         );
 
         AggregatedContextDocument saved = repository.save(document);
